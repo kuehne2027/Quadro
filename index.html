@@ -66,6 +66,11 @@ function parseWords(words,fallbackWeek,rulesRef){
  dates=dates.filter(o=>Math.abs(lines[o.li].y-hy)<H*2.5);weeks=weeks.filter(o=>Math.abs(lines[o.li].y-hy)<H*2.5);
  const headerBottom=Math.max(...[...dates,...weeks].map(o=>lines[o.li].y));
  const fy=+fallbackWeek.slice(0,4),wy=(weeks.find(o=>o.yr)||{}).yr||(dates.find(o=>o.yr)||{}).yr||fy;
+ // Descarta datas lidas errado (ex.: 13/11 lido como 18/11): as colunas são dias seguidos
+ {const ser=o=>Date.UTC(o.yr||wy,o.m-1,o.d)/864e5,ds=[...dates].sort((p,q)=>p.x-q.x),g=[];
+  for(let i=1;i<ds.length;i++)g.push(ds[i].x-ds[i-1].x);g.sort((p,q)=>p-q);const st=g.length?g[g.length>>1]:0;
+  if(ds.length>=3&&st>0){const base=o=>Math.round(ser(o)-Math.round((o.x-ds[0].x)/st)),cnt={};ds.forEach(o=>cnt[base(o)]=(cnt[base(o)]||0)+1);
+   const best=+Object.keys(cnt).sort((p,q)=>cnt[q]-cnt[p])[0];if(cnt[best]>=2)dates=dates.filter(o=>base(o)===best)}}
  // Completa datas que o OCR não leu (ex.: 22/10 borrado), pela posição das colunas
  {const ser=o=>Date.UTC(o.yr||wy,o.m-1,o.d)/864e5,mk=(n,x,li)=>{const d=new Date(n*864e5);return {d:d.getUTCDate(),m:d.getUTCMonth()+1,yr:d.getUTCFullYear(),x,li}};
   const ds=[...dates].sort((a,b)=>a.x-b.x),hx0=[...dates,...weeks].map(o=>o.x).sort((a,b)=>a-b),g0=[];
@@ -93,7 +98,7 @@ function parseWords(words,fallbackWeek,rulesRef){
  const raw={};
  for(const r of rows)for(const c of cols){
   const ws=words.filter(w=>Math.abs(cy(w)-r.y)<H*.75&&Math.abs(cx(w)-c.x)<tol&&cx(w)>labelLimit).sort((a,b)=>a.x0-b.x0);
-  const v=cleanVal(ws);if(!v||!plausible(r.dest,v))continue;
+  const v=fixSep(r.dest,cleanVal(ws));if(!v||!plausible(r.dest,v))continue;
   const k=r.dest+'-'+c.day;(((raw[c.week]??={})[k])??=[])[r.part??0]=v}
  const {cells,total}=composeCells(raw,rulesRef);
  // semana principal do print = a que tem mais datas; senão a maior semana
@@ -136,7 +141,11 @@ function cropCell(bmp,sc,row,c,g,s,th){
  for(let i=0;i<p.length;i+=4){const v=Math.min(p[i],p[i+1],p[i+2]);p[i]=v;if(v<mn)mn=v;if(v>mx)mx=v}
  if(mx-mn<40)return null; // célula vazia
  for(let i=0;i<p.length;i+=4){const v=(p[i]-mn)*255/(mx-mn)<th?0:255;p[i]=p[i+1]=p[i+2]=v}x.putImageData(im,0,0);return cc}
-function fixSep(d,v){if(!v)return v;if([2,3,5].includes(d)&&/^\d{2,3}\.\d{2}$/.test(v))v=v.replace('.',',');return v}
+function fixSep(d,v){if(!v||![2,3,5].includes(d))return v;
+ // Produtividade/SPR: o último separador é a vírgula decimal (1.008.49 → 1.008,49; 848.015 → 848,01)
+ const m=v.match(/^(\d[\d.,]*?)[.,](\d+)$/);if(!m)return v;const int=m[1].replace(/[.,]/g,''),dec=m[2];
+ if(dec.length===3&&!/[.,]/.test(m[1])&&+(int+dec)<1e4)return Number(int+dec).toLocaleString('pt-BR');
+ return Number(int).toLocaleString('pt-BR')+','+dec.slice(0,2)}
 async function verifyCells(r,bmp,sc,worker,wk){
  const g=r.geo;if(!g||!g.rows.length)return 0;let fixed=0,done=0;
  const alvo=[];for(const row of g.rows)for(const c of g.cols)if(c.week===wk)alvo.push({row,c,k:row.dest+'-'+c.day});
